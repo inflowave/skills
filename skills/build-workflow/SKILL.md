@@ -142,6 +142,57 @@ The single most-requested automation. Build it like this:
 - **Tag responders** at each meaningful step with `add_tag`
   (`tag_names: ["..."]`) so the customer can segment and retarget.
 
-Reference builds live in the Inflowave workspace: "Comment to DM — Keyword
-Auto-Reply", "Comment Response — AI Public Reply", "Comment to DM + Public Reply
-(Combo)", and "VIP Comment-to-DM Engine (Advanced)".
+## If / else and heavy branching — the exact procedure
+
+This is where builds most often go wrong. Follow it literally.
+
+1. **A branch is a `condition` node.** Its `config` needs `condition_type` and,
+   for comparisons, `operand`. List the type with `list_condition_types` and
+   confirm the exact operand with `describe_condition`. Common: `has_email`,
+   `has_tag`/`tag_exists` (operand = tag name), `follows_account`,
+   `follower_count_greater_than`/`_less_than` (operand = number),
+   `reply_contains_keyword` (operand = word), `clicked_button`,
+   `lead_has_responded`, `message_seen`, `from_country`.
+2. **Every condition node needs BOTH a true and a false edge.** Wire two edges
+   out of it with `condition_label: "true"` and `condition_label: "false"`
+   (synonyms `yes`/`no` work). A condition with only one branch FAILS CLOSED — if
+   the missing side is taken, the run just ends silently. This is the #1 "nothing
+   happened" cause. Both sides must go somewhere (a step, or an `end` node).
+3. **Point-in-time conditions must sit behind a wait.** `clicked_button`,
+   `message_seen`, `follows_account`, `lead_has_responded` are evaluated the
+   instant the run reaches them. Placed right after a send, they ALWAYS take the
+   NO branch (the human hasn't acted in that split second). Put a
+   `wait_for_response` (resolves the moment they reply/tap) or a `delay` BEFORE
+   the condition, then branch.
+4. **Nested if/else** = chain condition nodes: the true (or false) edge of the
+   first condition points at the second condition, each with its own two edges.
+   Don't try to express "A and B" in one node unless the condition type supports
+   grouped conditions — prefer two chained nodes, it's clearer on canvas.
+5. **Multi-way (more than 2 outcomes)** = a `switch`/`router` step keyed on a
+   variable, or several chained conditions. Confirm with `get_node_schema`.
+
+## Recipe: "check if they follow us" (do it this way)
+
+There is no one-click "did they follow" trigger. Two reliable patterns — use the
+button one for a fresh commenter, the profile one when the follow state is known:
+
+- **Ask + verify (best for cold comment/DM):**
+  1. `send_dm` asking "Are you following us?" with two `postback` buttons
+     (`button_type: "postback"`, e.g. label "Yes, I follow" / "Not yet", each with
+     a distinct `payload`).
+  2. `wait_for_response` (resolves on their tap; set `timeout_hours`).
+  3. `condition` `follows_account` (server-side truth) → true = continue,
+     false = a nudge DM ("give us a follow and I'll unlock it") then `end`.
+  Using BOTH the button and `follows_account` means a lie ("Yes" without
+  following) is caught by the real check.
+- **Profile-based (when you'll enrich first):** run `fetch_profile_info` (populates
+  the follow flag + follower count), then a `wait`/`delay`, then the
+  `follows_account` condition. Without the enrich step the flag is empty and the
+  condition takes the NO branch — always enrich or ask first.
+
+Tell the customer plainly: the follow check is reliable once the profile is
+fetched or they've tapped a button; it is not instant on a brand-new commenter.
+
+Reference builds live in the Inflowave workspace: "Keyword Comment to DM",
+"AI Public Reply to Comments", "Comment to DM + Public Reply (Combo)", and
+"VIP Comment-to-DM Engine (Advanced)".
